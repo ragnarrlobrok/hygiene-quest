@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hygiene-Quest · Die Kristalle von St. Hygiea</title>
+  <meta name="theme-color" content="#0b1240">
+  <meta name="description" content="Selbstlern-Rollenspiel zu T1_CE_02_M_03 – Hygienische Grundsätze für das Praxisfeld Pflege anwenden. Tandemarbeit, remote.">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app"><p style="padding:40px;text-align:center">Hygiene-Quest wird geladen …</p></div>
+
+  <!-- Netlify Forms: Vorlage für den Versand der Teilnahmebescheinigungen (nicht sichtbar) -->
+  <form name="teilnahmebescheinigung" method="POST" data-netlify="true" netlify-honeypot="bot-field" enctype="multipart/form-data" hidden>
+    <input type="text" name="teilnehmer">
+    <input type="text" name="tandempartner">
+    <input type="text" name="team">
+    <input type="text" name="modul">
+    <input type="text" name="abschlusstest">
+    <input type="text" name="bearbeitungszeit">
+    <input type="text" name="zertifikat_id">
+    <input type="text" name="empfaenger">
+    <textarea name="zusammenfassung"></textarea>
+    <input type="file" name="bescheinigung">
+    <input type="text" name="bot-field">
+  </form>
+
+  <noscript>Bitte JavaScript aktivieren, um Hygiene-Quest zu spielen.</noscript>
+  <script src="js/config.js" defer></script>
+  <script src="js/content.js" defer></script>
+  <script src="js/demos.js" defer></script>
+  <script src="js/app.js" defer></script>
+</body>
+</html>
