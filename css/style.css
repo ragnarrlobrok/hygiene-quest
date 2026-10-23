@@ -425,3 +425,24 @@ textarea#code, textarea#icode { font-family: ui-monospace, monospace; font-size:
   .win-box, .card { padding: 16px 14px; }
 }
 @media (prefers-reduced-motion: reduce) { .bubble { opacity: 1; animation: none; } .stars { animation: none; } }
+
+/* ---------- Ergänzungen: Arbeitsform, Video-Schritte, Vertiefung, Vorlesen ---------- */
+.modes { border: 2px solid rgba(255, 255, 255, .4); border-radius: 8px; padding: 10px 12px; display: grid; gap: 8px; }
+.modes legend { font-weight: 800; color: var(--gold); padding: 0 6px; }
+.mode-opt { display: flex !important; gap: 10px; align-items: center; cursor: pointer; padding: 8px 10px; border-radius: 6px; background: rgba(0, 0, 25, .35); border: 1px solid rgba(255, 255, 255, .25); }
+.mode-opt:has(input:checked) { border-color: var(--gold); background: rgba(255, 215, 106, .12); }
+.mode-opt input { width: 20px; height: 20px; accent-color: var(--gold2); flex: none; }
+.mode-opt small { display: block; color: var(--muted); font-weight: 600; }
+.prompts { background: rgba(0, 0, 25, .4); border: 2px solid rgba(255, 215, 106, .5); border-radius: 8px; padding: 12px 14px 12px 34px; }
+.prompts li { margin: 4px 0; font-weight: 600; }
+.vchecks { display: grid; gap: 6px; margin-top: 12px; }
+.vchecks label { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 6px; background: rgba(0, 0, 25, .35); border: 1px solid rgba(255, 255, 255, .3); cursor: pointer; }
+.vchecks label:has(input:checked) { background: var(--green-bg); border-color: var(--green); }
+.deep { margin: 12px 0; padding: 14px 16px; border: 2px solid var(--ice); border-radius: 8px; background: rgba(159, 216, 255, .1); animation: fadeUp .3s; }
+.deep h4 { color: var(--ice); margin-top: 0; }
+.deep-q { font-size: 17.5px; font-weight: 700; }
+.deep details { margin: 8px 0; } .deep summary { cursor: pointer; font-weight: 800; color: var(--gold); }
+.deepck { display: flex; gap: 10px; align-items: center; font-weight: 700; cursor: pointer; }
+.prev-list { columns: 2; column-gap: 24px; font-size: 15px; } .prev-list li { break-inside: avoid; margin: 3px 0; }
+.btn.speaking { border-color: var(--red); color: #fff; background: rgba(200, 50, 60, .45); }
+@media (max-width: 860px) { .prev-list { columns: 1; } }

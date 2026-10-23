@@ -221,8 +221,10 @@
     const voice = $('.demo-voice input');
     function speak(txt) {
       if (!voice.checked || !window.speechSynthesis) return;
-      try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(txt); u.lang = 'de-DE'; u.rate = .95; speechSynthesis.speak(u); } catch (e) {}
+      const clean = window.HQ_cleanSpeech ? window.HQ_cleanSpeech(txt) : txt;
+      try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(clean); u.lang = 'de-DE'; u.rate = .95; speechSynthesis.speak(u); } catch (e) {}
     }
+    voice.addEventListener('change', () => { if (!voice.checked) { try { speechSynthesis.cancel(); } catch (e) {} } });
     function show(k, say) {
       i = Math.max(0, Math.min(demo.steps.length - 1, k));
       const s = demo.steps[i];

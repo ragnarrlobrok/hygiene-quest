@@ -3,7 +3,7 @@
    ============================================================ */
 (function () {
   const CFG = window.HQ_CONFIG, MIS = window.HQ_MISSIONS, PAT = window.HQ_PATIENTS, CH = window.HQ_CHARS;
-  const KEY = 'hygieneQuest.save.v1';
+  const KEY = 'hygieneQuest.save.v2';
   const JSPDF_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
   const app = document.getElementById('app');
   let S = load();
@@ -13,12 +13,12 @@
 
   /* ---------------- Speicher ---------------- */
   function fresh() {
-    return { v: 1, team: null, missions: {}, patients: Object.fromEntries(PAT.map(p => [p.id, 100])),
+    return { v: 2, mode: CFG.standardModus || 'remote', team: null, missions: {}, patients: Object.fromEntries(PAT.map(p => [p.id, 100])),
       xp: 0, peer: {}, reflections: {}, finals: {}, certs: {}, sound: true, voice: false,
       tutorialSeen: false, created: Date.now(), time: {} };
   }
   function load() {
-    try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v === 1) return Object.assign(fresh(), s); } catch (e) {}
+    try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v === 2) return Object.assign(fresh(), s); } catch (e) {}
     return fresh();
   }
   function save() {
@@ -32,7 +32,7 @@
   function exportCode() { return btoa(unescape(encodeURIComponent(JSON.stringify(S)))); }
   function importCode(code) {
     const s = JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
-    if (!s || s.v !== 1) throw new Error('bad');
+    if (!s || s.v !== 2) throw new Error('bad');
     S = Object.assign(fresh(), s); save();
   }
 
@@ -44,9 +44,11 @@
     const aDrives = (mi + si) % 2 === 0;
     return aDrives ? { D: nameA(), C: nameB(), dKey: 'a' } : { D: nameB(), C: nameA(), dKey: 'b' };
   }
+  const remote = () => S.mode !== 'praesenz';
+  const VOR = () => remote() ? 'vor der Kamera' : 'vor Ihrer Tandem-Person';
   function fill(txt, r) {
     r = r || { D: nameA(), C: nameB() };
-    return String(txt).replace(/\{A\}/g, esc(nameA())).replace(/\{B\}/g, esc(nameB())).replace(/\{D\}/g, '<b class="nm">' + esc(r.D) + '</b>').replace(/\{C\}/g, '<b class="nm">' + esc(r.C) + '</b>');
+    return String(txt).replace(/\{VOR\}/g, VOR()).replace(/\{A\}/g, esc(nameA())).replace(/\{B\}/g, esc(nameB())).replace(/\{D\}/g, '<b class="nm">' + esc(r.D) + '</b>').replace(/\{C\}/g, '<b class="nm">' + esc(r.C) + '</b>');
   }
   function ms(id) {
     if (!S.missions[id]) S.missions[id] = { status: 'locked', step: 0, done: {}, harm: 0, quiz: {}, data: {} };
@@ -98,11 +100,29 @@
     cursor: () => tones([[1200, 0, .04]], 'square'),
     win: () => tones([[523, 0, .15], [659, .15, .15], [784, .3, .15], [1047, .45, .5], [988, .75, .15], [1047, .9, .6]])
   };
-  function speak(txt) {
-    if (!window.speechSynthesis) return toast('Vorlesen wird von diesem Browser nicht unterstützt.');
-    const plain = String(txt).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-    try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(plain); u.lang = 'de-DE'; u.rate = .95; speechSynthesis.speak(u); } catch (e) {}
+  // Vorlesen: Emojis (z. B. Hautfarben der Figuren) werden nicht vorgelesen; ein zweiter Klick stoppt.
+  let speakBtn = null;
+  const SPEAK_LABEL = '🔊 Vorlesen', STOP_LABEL = '⏹ Stopp';
+  function cleanSpeech(t) {
+    return String(t).replace(/<[^>]+>/g, ' ').replace(/[\p{Extended_Pictographic}\p{Emoji_Modifier}\u200d\ufe0f\u20e3]/gu, ' ')
+      .replace(/·/g, ',').replace(/\s+/g, ' ').trim();
   }
+  function stopSpeech() {
+    try { speechSynthesis.cancel(); } catch (e) {}
+    if (speakBtn) { speakBtn.textContent = speakBtn.dataset.label || SPEAK_LABEL; speakBtn.classList.remove('speaking'); speakBtn = null; }
+  }
+  function speak(txt, btn) {
+    if (!window.speechSynthesis) return toast('Vorlesen wird von diesem Browser nicht unterstützt.');
+    if (btn && speakBtn === btn) return stopSpeech();
+    stopSpeech();
+    try {
+      const u = new SpeechSynthesisUtterance(cleanSpeech(txt)); u.lang = 'de-DE'; u.rate = .95;
+      u.onend = u.onerror = () => { if (speakBtn === btn) stopSpeech(); };
+      if (btn) { btn.dataset.label = btn.dataset.label || btn.textContent; speakBtn = btn; btn.textContent = STOP_LABEL; btn.classList.add('speaking'); }
+      speechSynthesis.speak(u);
+    } catch (e) {}
+  }
+  window.HQ_cleanSpeech = cleanSpeech;
   function fmtMin(sec) { return Math.round((sec || 0) / 60) + ' Min.'; }
   function totalTime() { return Object.values(S.time).reduce((a, b) => a + b, 0); }
 
@@ -150,7 +170,7 @@
 
   function render() {
     cleanup.forEach(f => { try { f(); } catch (e) {} }); cleanup = [];
-    try { speechSynthesis.cancel(); } catch (e) {}
+    stopSpeech();
     const s = view.screen;
     let html;
     if (!S.team && s !== 'guide' && s !== 'save') html = welcome();
@@ -174,7 +194,15 @@
     app.querySelectorAll('[data-go]').forEach(b => b.onclick = (e) => { e.preventDefault(); go(b.dataset.go); });
     const snd = app.querySelector('[data-act=sound]');
     if (snd) snd.onclick = () => { S.sound = !S.sound; save(); render(); };
-    app.querySelectorAll('[data-speak]').forEach(b => b.onclick = () => speak(document.getElementById(b.dataset.speak).innerHTML));
+    app.querySelectorAll('[data-speak]').forEach(b => b.onclick = () => { const el = document.getElementById(b.dataset.speak); speak(speechText(el), b); });
+  }
+  // Text zum Vorlesen: Avatare und Knöpfe auslassen
+  function speechText(el) {
+    const c = el.cloneNode(true);
+    c.querySelectorAll('.av, button, .lc-ico').forEach(x => x.remove());
+    c.querySelectorAll('small').forEach(x => x.append(': '));
+    c.querySelectorAll('p, li, h4, td, th').forEach(x => x.append('. '));
+    return c.textContent.replace(/\.\s*\./g, '.').replace(/:\s*\./g, ':');
   }
   // Menü-Cursor-Klang (wie in klassischen Rollenspielen)
   document.addEventListener('mouseover', (e) => {
@@ -193,6 +221,7 @@
         if (a.length < 3 || b.length < 3) return toast('Bitte beide vollständigen Namen eingeben (Vor- und Nachname).', 'bad');
         if (a.toLowerCase() === b.toLowerCase()) return toast('Bitte zwei verschiedene Personen eintragen.', 'bad');
         S.team = { a, b, name: n, start: Date.now() };
+        S.mode = (f.querySelector('input[name=mode]:checked') || {}).value || 'remote';
         ms(MIS[0].id).status = 'open';
         sfx.win(); save(); go('map');
       };
@@ -201,12 +230,12 @@
     <section class="hero">
       <div class="hero-art">${crystalArt()}</div>
       <div class="hero-txt">
-        <span class="pill">Selbstlern-Rollenspiel · Tandem · remote</span>
+        <span class="pill">Selbstlern-Rollenspiel · Tandem · remote oder face to face</span>
         <h1>Hygiene-Quest</h1>
         <p class="subtitle">Die Kristalle von St. Hygiea</p>
         <div class="win-box story-box"><p>Im Klinikum St. Hygiea sind die acht <b>Hygiene-Kristalle</b> erloschen. Unsichtbare Gegner – Keime – bedrohen sechs Patientinnen und Patienten auf Station 3B.</p>
         <p>Sie und Ihre Tandem-Partnerin oder Ihr Tandem-Partner sind die neue Heldengruppe. Treffen Sie kluge Entscheidungen, meistern Sie die Video-Quests und bringen Sie alle Kristalle zum Leuchten!</p></div>
-        <ul class="ticks"><li>8 Kapitel · ca. 8 × 45 Minuten</li><li>Immer zu zweit: Tandem per Videokonferenz</li><li>Video-Quests: ansehen, nachmachen, gegenseitig prüfen</li><li>Am Ende: Teilnahmebescheinigung für jede Person</li></ul>
+        <ul class="ticks"><li>8 Kapitel · ca. 8 × 45 Minuten</li><li>Immer zu zweit: per Videokonferenz oder gemeinsam vor Ort</li><li>Video-Quests: ansehen, nachmachen, gegenseitig prüfen</li><li>Am Ende: Teilnahmebescheinigung für jede Person</li></ul>
       </div>
     </section>
     <section class="win-box narrow">
@@ -216,6 +245,10 @@
         <label>Person A (Vor- und Nachname)<input name="a" required autocomplete="off" placeholder="z. B. Maria Santos"></label>
         <label>Person B (Vor- und Nachname)<input name="b" required autocomplete="off" placeholder="z. B. Ahmed Karimi"></label>
         <label>Name der Gruppe (freiwillig)<input name="n" autocomplete="off" placeholder="z. B. Die Keimjäger"></label>
+        <fieldset class="modes"><legend>Wie arbeiten Sie zusammen?</legend>
+          <label class="mode-opt"><input type="radio" name="mode" value="remote" ${S.mode !== 'praesenz' ? 'checked' : ''}><span>🎥 <b>Remote</b><small>per Videokonferenz, eine Person teilt den Bildschirm</small></span></label>
+          <label class="mode-opt"><input type="radio" name="mode" value="praesenz" ${S.mode === 'praesenz' ? 'checked' : ''}><span>🧑‍🤝‍🧑 <b>Face to face</b><small>gemeinsam vor Ort an einem Gerät</small></span></label>
+        </fieldset>
         <button class="btn big">▶ Abenteuer beginnen</button>
       </form>
       <p class="muted small">Sie haben schon einen Spielstand-Code? <a href="#" data-go="save">Spielstand laden</a> · <a href="#" data-go="guide">Anleitung lesen</a></p>
@@ -273,7 +306,8 @@
         </div>
         <div class="win-box tip">
           <h3>💡 Tipp</h3>
-          <p>Eine Person teilt den Bildschirm in der Videokonferenz (mit Ton). Beide haben die Kamera an. Die Rollen <b>„Am Steuer“</b> und <b>„Coach“</b> wechseln automatisch.</p>
+          <p>${remote() ? 'Eine Person teilt den Bildschirm in der Videokonferenz (mit Ton). Beide haben die Kamera an.' : 'Sie sitzen gemeinsam vor einem Gerät. Für die Video-Quests stehen Sie sich gegenüber.'} Die Rollen <b>„Am Steuer“</b> und <b>„Coach“</b> wechseln automatisch.</p>
+          <p class="small muted">Arbeitsform: <b>${remote() ? '🎥 Remote' : '🧑‍🤝‍🧑 Face to face'}</b> · <a href="#" data-go="save">ändern</a></p>
           <button class="btn ghost sm" data-act="tut">Einführung noch einmal ansehen</button>
         </div>
       </aside>
@@ -293,7 +327,8 @@
     const si = view.si != null ? view.si : Math.min(st.step, m.steps.length - 1);
     view.si = si; view.mid = m.id;
     const step = m.steps[si], r = roles(mi, si);
-    const totalMin = m.steps.reduce((a, s) => a + (s.min || 0), 0);
+    const rawMin = m.steps.reduce((a, s) => a + (s.min || 3), 0);
+    const totalMin = 45, stepMin = Math.max(1, Math.round((step.min || 3) * 45 / rawMin));
     return `
     <div class="mhead">
       <button class="btn ghost sm" data-go="map">← Weltkarte</button>
@@ -305,7 +340,7 @@
     }).join('')}</ol>
     <div class="rolebar">
       <span>🎮 Am Steuer: <b>${esc(r.D)}</b></span><span>👀 Coach: <b>${esc(r.C)}</b></span>
-      <span class="muted">Schritt ${si + 1} von ${m.steps.length} · ca. ${step.min || 3} Min.</span>
+      <span class="muted">Schritt ${si + 1} von ${m.steps.length} · ca. ${stepMin} Min.</span>
     </div>
     <section class="win-box step" id="step">${stepHtml(m, mi, si, step, r)}</section>
     <div class="step-nav">
@@ -314,13 +349,13 @@
     </div>`;
   }
   function stepIcon(t) {
-    return { story: '💬', learn: '📚', order: '🧩', sort: '🗂️', partner: '🤝', scenario: '⚔️', quest: '🎬', quiz: '✅', reflect: '✍️', finaltest: '🎓' }[t] || '•';
+    return { story: '💬', video: '📺', learn: '📚', order: '🧩', sort: '🗂️', partner: '🤝', scenario: '⚔️', quest: '🎬', quiz: '✅', reflect: '✍️', finaltest: '🎓' }[t] || '•';
   }
-  const TYPE_LABEL = { story: 'Geschichte', learn: 'Wissensschriften', order: 'Rätsel', sort: 'Zuordnen', partner: 'Tandem-Aufgabe', scenario: 'Kampf: Entscheidungs-Fall', quest: 'Video-Quest', quiz: 'Kapitel-Prüfung', reflect: 'Reflexion', finaltest: 'Abschlusstest' };
+  const TYPE_LABEL = { video: 'Video', story: 'Geschichte', learn: 'Wissensschriften', order: 'Rätsel', sort: 'Zuordnen', partner: 'Tandem-Aufgabe', scenario: 'Kampf: Entscheidungs-Fall', quest: 'Video-Quest', quiz: 'Kapitel-Prüfung', reflect: 'Reflexion', finaltest: 'Abschlusstest' };
 
   function stepHtml(m, mi, si, s, r) {
     const head = `<div class="step-type">${stepIcon(s.type)} ${TYPE_LABEL[s.type]}</div><h3>${esc(s.title)}</h3>`;
-    const f = { story: storyHtml, learn: learnHtml, order: orderHtml, sort: sortHtml, partner: partnerHtml, scenario: scenarioHtml, quest: questHtml, quiz: quizHtml, reflect: reflectHtml, finaltest: finalHtml }[s.type];
+    const f = { video: videoStepHtml, story: storyHtml, learn: learnHtml, order: orderHtml, sort: sortHtml, partner: partnerHtml, scenario: scenarioHtml, quest: questHtml, quiz: quizHtml, reflect: reflectHtml, finaltest: finalHtml }[s.type];
     return head + f(m, mi, si, s, r);
   }
   function sdata(m, si) { const st = ms(m.id); st.data[si] = st.data[si] || {}; return st.data[si]; }
@@ -330,6 +365,21 @@
     st.step = Math.max(st.step, Math.min(si + 1, m.steps.length - 1));
     save();
     const nb = document.getElementById('nextBtn'); if (nb) { nb.disabled = false; nb.classList.add('pulse'); }
+  }
+
+  /* --- Video am Anfang / Ende des Kapitels --- */
+  function videoStepHtml(m, mi, si, s, r) {
+    const d = sdata(m, si), done = ms(m.id).done[si], intro = s.slot === 'intro';
+    const ck = d.ck || {};
+    return `<p class="hint">${intro
+        ? '👀 <b>Beobachtungsauftrag:</b> Lesen Sie zuerst gemeinsam die Fragen. Sehen Sie dann das Video an und beantworten Sie die Fragen danach im Gespräch.'
+        : '💬 <b>Abschlussdiskussion:</b> Sehen Sie das Video an. Diskutieren Sie danach die Fragen – beide Personen sagen ihre Meinung und begründen sie.'}</p>
+      <ol class="prompts">${s.prompts.map(p => `<li>${fill(p, r)}</li>`).join('')}</ol>
+      <p class="small muted">${intro ? fill('{D} liest die Fragen vor, {C} achtet beim Video besonders auf Frage 2.', r) : fill('{C} beginnt bei Frage 1, {D} bei Frage 2.', r)}</p>
+      ${videoBlock(m.id, s.slot)}
+      ${done ? `<div class="fb ok">✅ Video angesehen und besprochen.</div>` : `
+      <div class="vchecks">${['a', 'b'].map(k => `<label><input type="checkbox" data-vck="${k}" ${ck[k] ? 'checked' : ''}> ${esc(k === 'a' ? nameA() : nameB())}: Video gesehen und Fragen besprochen</label>`).join('')}</div>
+      <div class="row"><button class="btn" data-act="videoDone" id="vdBtn" disabled>Weiter freischalten${d.waited ? '' : ' (<span id="vdT">45</span>)'}</button></div>`}`;
   }
 
   /* --- Geschichte --- */
@@ -454,7 +504,12 @@
       return `<button class="opt ${isW ? 'wrong' : ''} ${isR ? 'right' : ''}" data-opt="${k}" ${isW || answered || discuss ? 'disabled' : ''}>${esc(o.t)}</button>`;
     }).join('')}</div>
     <div id="scfb">${d.lastFb || ''}</div>
-    ${answered ? `<button class="btn" data-act="scNext">${d.i < s.items.length - 1 ? 'Nächste Situation →' : 'Kampf auswerten →'}</button>` : ''}`;
+    ${answered && it.deep ? `<div class="deep"><h4>🧠 Vertiefung – diskutieren Sie gemeinsam (ca. 2 Min.)</h4>
+      <p class="deep-q">${esc(it.deep.q)}</p>
+      <p class="small muted">${fill('{C} antwortet zuerst, {D} ergänzt oder widerspricht mit Begründung. Erst danach die Musterantwort öffnen.', r)}</p>
+      <details><summary>Musterantwort anzeigen</summary><p>${esc(it.deep.a)}</p></details>
+      <label class="deepck"><input type="checkbox" data-deep ${d.deepOk && d.deepOk[d.i] ? 'checked' : ''}> Wir haben die Vertiefungsfrage besprochen</label></div>` : ''}
+    ${answered ? `<button class="btn" data-act="scNext" ${it.deep && !(d.deepOk && d.deepOk[d.i]) ? 'disabled' : ''}>${d.i < s.items.length - 1 ? 'Nächste Situation →' : 'Kampf auswerten →'}</button>` : ''}`;
   }
 
   /* --- Video-Quest --- */
@@ -467,15 +522,17 @@
     let body = '';
     if (d.phase === 'watch') {
       body = `<p>${fill(s.intro)}</p>
-      ${videoBlock(s.demo)}
-      <h4>🎞️ Animation: alle Schritte zum Mitlesen</h4>
+      ${videoBlock(m.id, 'action')}
+      ${s.demo ? `<h4>🎞️ Animation: alle Schritte zum Mitlesen</h4>
       <div id="demoBox"></div>
-      <p class="hint">🎬 Sehen Sie sich die Animation gemeinsam bis zum Ende an (und gern auch die YouTube-Videos). ${d.watched ? '<b class="ok-txt">✓ Gesehen</b>' : ''}</p>
-      <button class="btn" data-act="toPractice" ${d.watched ? '' : 'disabled'} id="toPractice">Weiter zur Übung →</button>`;
+      <p class="hint">🎬 Sehen Sie sich das Video und die Animation gemeinsam bis zum Ende an. ${d.watched ? '<b class="ok-txt">✓ Gesehen</b>' : ''}</p>`
+      : `<h4>✔️ Darauf achtet die prüfende Person gleich</h4><ul class="prev-list">${s.checklist.map(c => `<li>${esc(c)}</li>`).join('')}</ul>
+      <p class="hint">🎬 Sehen Sie sich das Video gemeinsam bis zum Ende an. ${d.watched ? '<b class="ok-txt">✓ Gesehen</b>' : ''}</p>`}
+      <button class="btn" data-act="toPractice" ${d.watched ? '' : 'disabled'} id="toPractice">${s.demo || d.watched ? 'Weiter zur Übung →' : 'Wir haben das Video gesehen (<span id="wT">30</span>)'}</button>`;
     } else if (who) {
       const coach = who === 'a' ? 'b' : 'a';
       const ck = d.ck || [];
-      body = `<div class="peer-head"><div class="ph-who">🎥 <b>${esc(nm(who))}</b> zeigt vor der Kamera</div><div class="ph-who">👀 <b>${esc(nm(coach))}</b> prüft</div></div>
+      body = `<div class="peer-head"><div class="ph-who">🎥 <b>${esc(nm(who))}</b> zeigt ${VOR()}</div><div class="ph-who">👀 <b>${esc(nm(coach))}</b> prüft</div></div>
       <p class="hint">📦 ${esc(s.practice)}</p>
       ${s.timer ? timerHtml(s.timer, 'qt') : ''}
       ${d.missed ? `<div class="fb bad">🔁 <b>Verbesserungsschleife (Versuch ${pq[who].tries + 1}):</b> Diese Punkte haben beim letzten Mal gefehlt:<ul>${d.missed.map(x => `<li>${esc(x)}</li>`).join('')}</ul>Sehen Sie sich die Schritte im Video noch einmal an und versuchen Sie es erneut.</div>
@@ -492,15 +549,16 @@
     const chip = (k) => `<span class="chip ${pq[k].passed ? 'ok' : ''}">${pq[k].passed ? '✅' : '⏳'} ${esc(nm(k))}</span>`;
     return `<div class="chips">${chip('a')}${chip('b')}</div>${body}`;
   }
-  function videoBlock(key) {
-    const list = ((CFG.videos || {})[key] || []).filter(v => v && (v.id || v.url));
+  function videoBlock(mid, slot) {
+    const list = (((CFG.videos || {})[mid] || {})[slot] || []).filter(v => v && (v.id || v.url));
     if (!list.length) return '';
     const first = list[0];
     const ytUrl = (v) => v.id ? 'https://www.youtube.com/watch?v=' + v.id : v.url;
     const embed = first.id
       ? `<div class="vwrap"><iframe src="https://www.youtube-nocookie.com/embed/${esc(first.id)}" title="${esc(first.title)}" allow="accelerometer; encrypted-media; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`
       : `<video class="vwrap" src="${esc(first.url)}" controls preload="metadata"></video>`;
-    return `<h4>📺 Lehrfilm (YouTube, deutsch)</h4>${embed}
+    const head = { intro: '📺 Einstiegsvideo (deutsch)', action: '📺 Lehrfilm zum Nachmachen (deutsch)', outro: '📺 Abschlussvideo (deutsch)' }[slot];
+    return `<h4>${head}</h4>${embed}
       <ul class="vlinks">${list.map(v => `<li><a href="${esc(ytUrl(v))}" target="_blank" rel="noopener">▶ ${esc(v.title)}</a> <small>– ${esc(v.quelle || '')}</small></li>`).join('')}</ul>
       <p class="muted small">Wenn das Video hier nicht startet: Klicken Sie auf den Link – er öffnet YouTube in einem neuen Fenster.</p>`;
   }
@@ -608,6 +666,19 @@
       cleanup.push(() => clearInterval(iv));
     });
 
+    if (s.type === 'video') {
+      const btn = $('#vdBtn');
+      if (btn) {
+        const upd = () => { const c = d.ck || {}; btn.disabled = !(d.waited && c.a && c.b); };
+        $$('[data-vck]').forEach(c => c.onchange = () => { d.ck = d.ck || {}; d.ck[c.dataset.vck] = c.checked; save(); upd(); });
+        if (!d.waited) {
+          let n = 45; const iv = setInterval(() => { n--; const t = $('#vdT'); if (t) t.textContent = n; if (n <= 0) { clearInterval(iv); d.waited = true; save(); if (t) t.parentNode.removeChild(t); btn.textContent = 'Weiter freischalten'; upd(); } }, 1000);
+          cleanup.push(() => clearInterval(iv));
+        }
+        upd();
+        btn.onclick = () => { sfx.ok(); markDone(m, si, 20); rerender(); };
+      }
+    }
     if (s.type === 'learn') {
       $$('[data-card]').forEach(b => b.onclick = () => { const k = +b.dataset.card; view.card = k; if (!d.seen.includes(k)) d.seen.push(k); save(); render(); });
     }
@@ -682,6 +753,8 @@
         }
         view.scrollFb = true; save(); rerender();
       });
+      const dp = $('[data-deep]');
+      if (dp) dp.onchange = () => { d.deepOk = d.deepOk || {}; d.deepOk[d.i] = dp.checked; save(); const b = $('[data-act=scNext]'); if (b) b.disabled = !dp.checked; if (dp.checked) addXP(10); };
       const nx = $('[data-act=scNext]');
       if (nx) nx.onclick = () => {
         d.lastFb = ''; d.answered = null;
@@ -696,11 +769,16 @@
       if (rt) rt.onclick = () => { st.data[si] = {}; save(); rerender(); };
     }
     if (s.type === 'quest') {
-      if (d.phase === 'watch') {
+      if (d.phase === 'watch' && s.demo) {
         const p = window.HQ_DemoPlayer($('#demoBox'), s.demo, { voice: S.voice, onEnd: () => { d.watched = true; save(); const b = $('#toPractice'); if (b) b.disabled = false; toast('✓ Animation vollständig angesehen'); } });
         cleanup.push(() => p.destroy());
       }
-      const tp = $('[data-act=toPractice]'); if (tp) tp.onclick = () => { d.phase = 'practice'; addXP(10); save(); rerender(); };
+      const tp = $('[data-act=toPractice]');
+      if (tp && d.phase === 'watch' && !s.demo && !d.watched) {
+        let n = 30; const iv = setInterval(() => { n--; const t = $('#wT'); if (t) t.textContent = n; if (n <= 0) { clearInterval(iv); d.watched = true; save(); tp.disabled = false; tp.textContent = 'Wir haben das Video gesehen → zur Übung'; } }, 1000);
+        cleanup.push(() => clearInterval(iv));
+      }
+      if (tp) tp.onclick = () => { d.phase = 'practice'; addXP(10); save(); rerender(); };
       const rw = $('[data-act=rewatch]'); if (rw) rw.onclick = () => { d.phase = 'watch'; d.watched = false; save(); rerender(); };
       $$('[data-qck]').forEach(c => c.onchange = () => {
         d.ck = d.ck || []; const k = +c.dataset.qck;
@@ -797,9 +875,10 @@
   function tutorial() {
     const slides = [
       ['💎', 'Willkommen, ' + esc(nameA()) + ' und ' + esc(nameB()) + '!', 'Sie sind die neue Heldengruppe des Klinikums St. Hygiea. In 8 Kapiteln lernen Sie Schritt für Schritt die wichtigsten Hygieneregeln – und bringen die 8 Hygiene-Kristalle zum Leuchten.'],
-      ['🎥', 'Immer zu zweit', 'Starten Sie eine Videokonferenz (z. B. Teams, Zoom). <b>Eine Person teilt den Bildschirm mit Ton</b>, beide haben die Kamera an. Oben steht immer, wer <b>am Steuer</b> ist (klickt und entscheidet) und wer <b>Coach</b> ist (prüft und gibt Feedback).'],
+      remote() ? ['🎥', 'Immer zu zweit – remote', 'Starten Sie eine Videokonferenz (z. B. Teams, Zoom). <b>Eine Person teilt den Bildschirm mit Ton</b>, beide haben die Kamera an. Oben steht immer, wer <b>am Steuer</b> ist (klickt und entscheidet) und wer <b>Coach</b> ist (prüft und gibt Feedback).']
+               : ['🧑‍🤝‍🧑', 'Immer zu zweit – face to face', 'Setzen Sie sich gemeinsam vor <b>ein Gerät</b> (Laptop oder Tablet, Ton an). Oben steht immer, wer <b>am Steuer</b> ist (klickt und entscheidet) und wer <b>Coach</b> ist (prüft und gibt Feedback). Für die Video-Quests stehen Sie sich gegenüber.'],
       ['⚔️', 'Kämpfe = Entscheidungen', 'In jedem Kapitel wartet ein Gegner. Richtige Entscheidungen treffen den Gegner. Eine falsche Entscheidung kostet einen Patienten HP. Dann besprechen Sie den Fehler und korrigieren ihn.'],
-      ['🎬', 'Video-Quests', 'Sie sehen ein Lehrvideo. Danach macht jede Person die Technik vor der Kamera nach. Die andere Person prüft mit einer Checkliste. Fehlt etwas, üben Sie noch einmal.'],
+      ['🎬', 'Video-Quests', 'Sie sehen ein Lehrvideo. Danach macht jede Person die Technik ' + VOR() + ' nach. Die andere Person prüft mit einer Checkliste. Fehlt etwas, üben Sie noch einmal.'],
       ['🔓', 'Freischalten & Speichern', 'Die Kapitel werden nacheinander freigeschaltet. Ihr Fortschritt wird automatisch gespeichert. Mit dem <b>Spielstand-Code</b> (💾) können Sie auf einem anderen Gerät weiterspielen.'],
       ['🎓', 'Die Bescheinigung', 'Am Ende macht jede Person den Abschlusstest. Danach erhält jede Person eine eigene Teilnahmebescheinigung – sie wird an die Kursleitung gesendet.']
     ];
@@ -840,13 +919,13 @@
     return `<section class="win-box prose">
       <h2>📜 Anleitung: So funktioniert Hygiene-Quest</h2>
       <div class="guide-grid">
-        <div class="g"><span>1</span><h4>Videokonferenz starten</h4><p>Treffen Sie sich zu zweit online (Teams, Zoom, …). Eine Person öffnet das Spiel und <b>teilt den Bildschirm mit Ton</b>. Beide schalten die <b>Kamera</b> ein.</p></div>
+        <div class="g"><span>1</span><h4>Zusammenkommen</h4><p><b>Remote:</b> Treffen Sie sich online (Teams, Zoom, …). Eine Person öffnet das Spiel und <b>teilt den Bildschirm mit Ton</b>, beide schalten die <b>Kamera</b> ein.<br><b>Face to face:</b> Sie sitzen gemeinsam vor einem Gerät mit Ton. Die Arbeitsform können Sie unter 💾 Spielstand jederzeit ändern.</p></div>
         <div class="g"><span>2</span><h4>Heldengruppe bilden</h4><p>Tragen Sie beide <b>vollständigen Namen</b> ein. Diese Namen stehen später auf der Bescheinigung.</p></div>
         <div class="g"><span>3</span><h4>Kapitel wählen</h4><p>Auf der Weltkarte sehen Sie 8 Kapitel. Ein Kapitel dauert ca. <b>45 Minuten</b>. Das nächste Kapitel wird erst freigeschaltet, wenn das vorherige fertig ist.</p></div>
         <div class="g"><span>4</span><h4>Rollen</h4><p><b>🎮 Am Steuer:</b> liest, klickt, entscheidet, macht vor.<br><b>👀 Coach:</b> hört zu, fragt nach, prüft mit Checklisten, gibt Feedback. Die Rollen wechseln automatisch.</p></div>
         <div class="g"><span>5</span><h4>Schritte</h4><p>📚 Wissensschriften · 🧩 Rätsel · 🗂️ Zuordnen · 🤝 Tandem-Aufgabe · ⚔️ Kampf (Entscheidungs-Fall) · 🎬 Video-Quest · ✅ Kapitel-Prüfung · ✍️ Reflexion. „Weiter“ geht erst, wenn ein Schritt geschafft ist.</p></div>
         <div class="g"><span>6</span><h4>Fehler & Korrektur</h4><p>Falsche Entscheidungen kosten Patienten HP. Sie müssen den Fehler besprechen und korrigieren. Bei unter ${CFG.scenarioPass} % Patientensicherheit oder unter ${Math.round(CFG.quizPass * 100)} % in der Kapitel-Prüfung wiederholen Sie den Teil – mit Erklärungen.</p></div>
-        <div class="g"><span>7</span><h4>Video-Quests</h4><p>Sehen Sie sich das Lehrvideo (YouTube) und die Animation an. Dann macht jede Person die Technik <b>vor der Kamera</b> nach. Die andere Person hakt die Checkliste ab. <b>Alle Punkte</b> müssen stimmen – sonst folgt ein neuer Versuch.</p></div>
+        <div class="g"><span>7</span><h4>Video-Quests</h4><p>Jedes Kapitel hat drei deutsche Videos: ein <b>Einstiegsvideo</b>, ein <b>Video zum Nachmachen</b> (Video-Quest) und ein <b>Abschlussvideo</b>. Dann macht jede Person die Technik <b>vor der Kamera</b> bzw. <b>vor der Tandem-Person</b> nach. Die andere Person hakt die Checkliste ab. <b>Alle Punkte</b> müssen stimmen – sonst folgt ein neuer Versuch.</p></div>
         <div class="g"><span>8</span><h4>Speichern</h4><p>Alles wird <b>automatisch</b> in diesem Browser gespeichert. Unter 💾 <b>Spielstand</b> erhalten Sie einen Code. Damit kann auch die andere Person auf ihrem Gerät weiterspielen.</p></div>
         <div class="g"><span>9</span><h4>Bescheinigung</h4><p>In Kapitel 8 macht jede Person allein den Abschlusstest. Danach erstellen Sie unter 🎓 für <b>jede Person</b> eine Teilnahmebescheinigung (PDF). Sie wird an die Kursleitung gesendet.</p></div>
       </div>
@@ -874,6 +953,7 @@
       if (cp) cp.onclick = () => { const t = document.getElementById('code'); t.select(); try { navigator.clipboard.writeText(t.value); } catch (e) { document.execCommand('copy'); } toast('✓ Code kopiert'); };
       if (dl) dl.onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([exportCode()], { type: 'text/plain' })); a.download = 'hygiene-quest-spielstand.txt'; a.click(); };
       if (imp) imp.onclick = () => { try { importCode(document.getElementById('icode').value); toast('✓ Spielstand geladen', 'ok'); go('map'); } catch (e) { toast('Der Code ist ungültig.', 'bad'); } };
+      document.querySelectorAll('input[name=smode]').forEach(r => r.onchange = () => { S.mode = r.value; save(); toast('✓ Arbeitsform geändert: ' + (r.value === 'praesenz' ? 'Face to face' : 'Remote')); });
       if (rs) rs.onclick = () => { if (confirm('Wirklich ALLES löschen und neu beginnen? Das kann nicht rückgängig gemacht werden.')) { S = fresh(); save(); go('welcome'); } };
     });
     return `<section class="win-box prose narrow"><h2>💾 Spielstand</h2>
@@ -881,6 +961,9 @@
       ${S.team ? `<h3>Code exportieren</h3><p class="muted small">Kopieren Sie den Code und senden Sie ihn Ihrer Tandem-Person (z. B. im Chat der Videokonferenz). So kann sie auf ihrem Gerät weiterspielen und den Bildschirm teilen.</p>
       <textarea id="code" rows="4" readonly>${exportCode()}</textarea>
       <div class="row"><button class="btn" id="cpBtn">📋 Code kopieren</button><button class="btn ghost" id="dlBtn">⬇ Als Datei speichern</button></div>` : ''}
+      ${S.team ? `<h3>Arbeitsform</h3><fieldset class="modes">
+        <label class="mode-opt"><input type="radio" name="smode" value="remote" ${S.mode !== 'praesenz' ? 'checked' : ''}><span>🎥 <b>Remote</b><small>Videokonferenz mit geteiltem Bildschirm</small></span></label>
+        <label class="mode-opt"><input type="radio" name="smode" value="praesenz" ${S.mode === 'praesenz' ? 'checked' : ''}><span>🧑‍🤝‍🧑 <b>Face to face</b><small>gemeinsam vor Ort an einem Gerät</small></span></label></fieldset>` : ''}
       <h3>Code laden</h3><textarea id="icode" rows="3" placeholder="Code hier einfügen …"></textarea><button class="btn" id="impBtn">Spielstand laden</button>
       ${S.team ? `<h3>Statistik</h3><ul><li>Bearbeitungszeit gesamt: <b>${fmtMin(totalTime())}</b></li>${MIS.map(m => `<li>Kapitel ${m.nr}: ${ms(m.id).status === 'done' ? '💎' : '⏳'} · ${fmtMin(S.time[m.id])}</li>`).join('')}</ul>
       <h3>Neu beginnen</h3><button class="btn danger" id="rstBtn">Alles löschen</button>` : ''}
@@ -922,7 +1005,7 @@
     const other = k === 'a' ? 'b' : 'a';
     return [
       'Teilnehmer/in: ' + S.team[k], 'Tandempartner/in: ' + S.team[other], 'Gruppe: ' + S.team.name,
-      'Modul: ' + CFG.modulCode + ' ' + CFG.modulTitel, 'Umfang: ' + CFG.umfang,
+      'Modul: ' + CFG.modulCode + ' ' + CFG.modulTitel, 'Umfang: ' + CFG.umfang, 'Arbeitsform: ' + (remote() ? 'remote (Videokonferenz)' : 'face to face'),
       'Start: ' + new Date(S.team.start).toLocaleString('de-DE'),
       'Abschlusstest bestanden am: ' + (S.finals[k] && S.finals[k].date ? new Date(S.finals[k].date).toLocaleString('de-DE') : '-'),
       'Abschlusstest: ' + (S.finals[k] ? Math.round(S.finals[k].score * 100) + ' % (' + S.finals[k].tries + ' Versuch/e)' : '-'),
